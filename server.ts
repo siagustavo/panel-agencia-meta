@@ -1,13 +1,17 @@
 import express from "express";
 import axios from "axios";
 import { createClient } from "@supabase/supabase-js";
+import path from "path";
 
 const app = express();
 app.use(express.json());
-   import path from "path";
-   app.use(express.static(__dirname));
+
+// Servir la interfaz visual de la plataforma azul desde la raíz del proyecto
+const rootPath = path.resolve(process.cwd());
+app.use(express.static(rootPath));
+
 app.get("/", (req, res) => {
-    res.sendFile(path.join(__dirname, "index.html"));
+    res.sendFile(path.join(rootPath, "index.html"));
 });
 
 // Conexión genérica a Supabase
@@ -39,11 +43,6 @@ app.get("/webhook", (req: express.Request, res: express.Response) => {
     return res.sendStatus(400);
 });
 
-// Dejamos el espacio listo para las partes 2 y 3 aquí abajo...
-
-app.listen(PORT, () => {
-    console.log(`🚀 Servidor espejo Meta Puro corriendo en puerto ${PORT}`);
-});
 /**
  * 2. RECEPTOR DE MENSAJES Y CONTADOR DE CONVERSACIONES (24 HORAS)
  */
@@ -162,18 +161,17 @@ app.post("/webhook", async (req: express.Request, res: express.Response) => {
             return res.sendStatus(200);
         }
 
-       // Llamamos al motor pensante y ejecutor de Meta
-await procesarGeminiYResponder(customerPhone, userText, botConfig, botPhoneId); 
+        // Llamamos al motor pensante y ejecutor de Meta
+        await procesarGeminiYResponder(customerPhone, userText, botConfig, botPhoneId); 
 
     } catch (globalError) {
         console.error("💥 Error crítico en el Webhook de recepción:", globalError);
         return res.sendStatus(500);
     }
 });
+
 /**
- * 3. MOTOR INTELIGENTE MULTI-MODELO Y MULTI-RUBRO (GEMINI, CLAUDE, OPENAI + IMÁGENES)
- * Procesa la lógica de IA de forma asíncrona, gestiona el historial en Supabase,
- * extrae posibles leads de valor y despacha la respuesta final a la API de WhatsApp de Meta.
+ * 3. MOTOR INTELIGENTE MULTI-MODELO Y MULTI-RUBRO
  */
 async function procesarGeminiYResponder(
   customerPhone: string,
@@ -182,7 +180,6 @@ async function procesarGeminiYResponder(
   botPhoneId: string
 ): Promise<void> {
   try {
-    // 1. Detección y extracción proactiva de datos clave (Leads de seguimiento por correo)
     const emailRegex = /[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}/g;
     const detectedEmails = userText.match(emailRegex);
 
@@ -205,7 +202,6 @@ async function procesarGeminiYResponder(
       }
     }
 
-    // 2. Recuperación o inicialización del historial de chat en Supabase
     let chatHistory: any[] = [];
     try {
       const { data: record, error: fetchError } = await supabase
@@ -224,10 +220,8 @@ async function procesarGeminiYResponder(
       console.warn('[History Sync] Error atrapado en fetch de historial:', historyErr.message);
     }
 
-    // Incluir el nuevo mensaje entrante del usuario al historial local
     chatHistory.push({ role: 'user', content: userText });
 
-    // 3. Resolución de parámetros de configuración dinámica (Cualquier Rubro)
     const aiProvider = (botConfig?.ai_provider || 'gemini').toLowerCase();
     const aiModel = botConfig?.ai_model || 'gemini-2.5-flash';
     const systemPrompt = botConfig?.system_prompt || 'Responder de forma concisa, amable y profesional.';
@@ -236,10 +230,8 @@ async function procesarGeminiYResponder(
     let generatedText = '';
     let generatedImageUrl = '';
 
-    // 4. Enrutamiento del proveedor de IA y tipo de salida (Texto vs Generación de Imágenes)
     if (botType === 'image_generator') {
       try {
-        // Ejecutar generación de imagen usando Dall-E de OpenAI según configuración
         const openaiApiKey = process.env.OPENAI_API_KEY || '';
         const response = await fetch('https://api.openai.com/v1/images/generations', {
           method: 'POST',
@@ -265,12 +257,10 @@ async function procesarGeminiYResponder(
         generatedText = `Lo siento, experimenté dificultades técnicas al recrear tu imagen: ${imgErr.message}`;
       }
     } else {
-      // Flujo tradicional conversacional multi-modelo (Texto o Código para cualquier fábrica/comercio)
       if (aiProvider === 'gemini') {
         const geminiApiKey = process.env.GEMINI_API_KEY || '';
         const geminiUrl = `https://generativelanguage.googleapis.com/v1beta/models/${aiModel}:generateContent?key=${geminiApiKey}`;
 
-        // Mapear los roles a la estructura nativa requerida por Gemini
         const formattedContents = chatHistory.map((item) => ({
           role: item.role === 'user' ? 'user' : 'model',
           parts: [{ text: item.content }]
@@ -326,7 +316,6 @@ async function procesarGeminiYResponder(
         generatedText = data?.content?.[0]?.text || '';
 
       } else {
-        // FALLBACK GLOBAL DE CHAT: OPENAI (GPT-4o, GPT-4 mini, etc.)
         const openaiApiKey = process.env.OPENAI_API_KEY || '';
         const openaiMessages = [
           { role: 'system', content: systemPrompt },
@@ -358,7 +347,6 @@ async function procesarGeminiYResponder(
       }
     }
 
-    // 5. Normalizar resultado, registrar respuesta en el historial y sincronizar con Supabase
     if (!generatedText && !generatedImageUrl) {
       generatedText = 'Disculpa la molestia, pero me ha sido imposible procesar una respuesta en este momento.';
     }
@@ -383,7 +371,6 @@ async function procesarGeminiYResponder(
       console.error('[History Sync Error] Falló el guardado del historial:', upsertHistErr.message);
     }
 
-    // 6. Despachar la respuesta saliente hacia la API oficial de WhatsApp Cloud (Meta)
     const metaAccessToken = process.env.META_ACCESS_TOKEN || '';
     const metaUrl = `https://graph.facebook.com/v17.0/${botPhoneId}/messages`;
 
@@ -433,3 +420,8 @@ async function procesarGeminiYResponder(
     console.error('[procesarGeminiYResponder] Falló el procesamiento del flujo asincrónico:', error.message || error);
   }
 }
+
+// Escucha del servidor al final de todo el archivo para evitar bloqueos
+app.listen(PORT, () => {
+    console.log(`🚀 Servidor espejo Meta Puro corriendo en puerto ${PORT}`);
+});
