@@ -6,12 +6,12 @@ import path from "path";
 const app = express();
 app.use(express.json());
 
-// Servir la interfaz visual de la plataforma azul desde la raíz del proyecto
-const rootPath = path.resolve(process.cwd());
-app.use(express.static(rootPath));
+// IMPORTANTE: Vite pone los archivos finales en una carpeta 'dist'
+const distPath = path.resolve(process.cwd(), "dist"); 
+app.use(express.static(distPath));
 
-app.get("/", (req, res) => {
-    res.sendFile(path.join(rootPath, "index.html"));
+app.get("*", (req, res) => {
+    res.sendFile(path.join(distPath, "index.html"));
 });
 
 // Conexión genérica a Supabase
