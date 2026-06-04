@@ -4,6 +4,11 @@ import { createClient } from "@supabase/supabase-js";
 
 const app = express();
 app.use(express.json());
+   import path from "path";
+   app.use(express.static(path.join(__dirname, "./")));
+   app.get("/", (req, res) => {
+       res.sendFile(path.join(__dirname, "index.html"));
+   });
 
 // Conexión genérica a Supabase
 const supabaseUrl = process.env.SUPABASE_URL || "";
