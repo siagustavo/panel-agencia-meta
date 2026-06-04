@@ -165,3 +165,266 @@ await procesarGeminiYResponder(customerPhone, userText, botConfig, botPhoneId);
         return res.sendStatus(500);
     }
 });
+/**
+ * 3. MOTOR INTELIGENTE MULTI-MODELO Y MULTI-RUBRO (GEMINI, CLAUDE, OPENAI + IMÁGENES)
+ * Procesa la lógica de IA de forma asíncrona, gestiona el historial en Supabase,
+ * extrae posibles leads de valor y despacha la respuesta final a la API de WhatsApp de Meta.
+ */
+async function procesarGeminiYResponder(
+  customerPhone: string,
+  userText: string,
+  botConfig: any,
+  botPhoneId: string
+): Promise<void> {
+  try {
+    // 1. Detección y extracción proactiva de datos clave (Leads de seguimiento por correo)
+    const emailRegex = /[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}/g;
+    const detectedEmails = userText.match(emailRegex);
+
+    if (detectedEmails && detectedEmails.length > 0) {
+      const emailExtraido = detectedEmails[0];
+      try {
+        console.log(`[Lead Tracker] Capturando lead potencial para el rubro: ${botConfig?.client_name || 'Genérico'}`);
+        await supabase.from('leads_seguimiento').upsert(
+          {
+            customer_phone: customerPhone,
+            bot_phone_id: botPhoneId,
+            email: emailExtraido,
+            status: 'Interesado',
+            updated_at: new Date().toISOString()
+          },
+          { onConflict: 'customer_phone,bot_phone_id' }
+        );
+      } catch (upsertErr: any) {
+        console.error('[Lead Tracker] No se pudo persistir el seguimiento del lead:', upsertErr.message);
+      }
+    }
+
+    // 2. Recuperación o inicialización del historial de chat en Supabase
+    let chatHistory: any[] = [];
+    try {
+      const { data: record, error: fetchError } = await supabase
+        .from('bot_chat_history')
+        .select('messages')
+        .eq('customer_phone', customerPhone)
+        .eq('bot_phone_id', botPhoneId)
+        .maybeSingle();
+
+      if (fetchError) {
+        console.warn('[History Sync] Error buscando historial previo:', fetchError.message);
+      } else if (record && Array.isArray(record.messages)) {
+        chatHistory = record.messages;
+      }
+    } catch (historyErr: any) {
+      console.warn('[History Sync] Error atrapado en fetch de historial:', historyErr.message);
+    }
+
+    // Incluir el nuevo mensaje entrante del usuario al historial local
+    chatHistory.push({ role: 'user', content: userText });
+
+    // 3. Resolución de parámetros de configuración dinámica (Cualquier Rubro)
+    const aiProvider = (botConfig?.ai_provider || 'gemini').toLowerCase();
+    const aiModel = botConfig?.ai_model || 'gemini-2.5-flash';
+    const systemPrompt = botConfig?.system_prompt || 'Responder de forma concisa, amable y profesional.';
+    const botType = botConfig?.bot_type || 'text_service';
+
+    let generatedText = '';
+    let generatedImageUrl = '';
+
+    // 4. Enrutamiento del proveedor de IA y tipo de salida (Texto vs Generación de Imágenes)
+    if (botType === 'image_generator') {
+      try {
+        // Ejecutar generación de imagen usando Dall-E de OpenAI según configuración
+        const openaiApiKey = process.env.OPENAI_API_KEY || '';
+        const response = await fetch('https://api.openai.com/v1/images/generations', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'Authorization': `Bearer ${openaiApiKey}`
+          },
+          body: JSON.stringify({
+            model: aiModel.includes('dall-e-3') ? 'dall-e-3' : 'dall-e-2',
+            prompt: userText,
+            n: 1,
+            size: aiModel.includes('dall-e-3') ? '1024x1024' : '512x512'
+          })
+        });
+        const imgData: any = await response.json();
+        generatedImageUrl = imgData?.data?.[0]?.url || '';
+
+        if (!generatedImageUrl) {
+          throw new Error('No se pudo resolver una URL de imagen válida del proveedor.');
+        }
+      } catch (imgErr: any) {
+        console.error('[AI Image Engine] Error:', imgErr.message);
+        generatedText = `Lo siento, experimenté dificultades técnicas al recrear tu imagen: ${imgErr.message}`;
+      }
+    } else {
+      // Flujo tradicional conversacional multi-modelo (Texto o Código para cualquier fábrica/comercio)
+      if (aiProvider === 'gemini') {
+        const geminiApiKey = process.env.GEMINI_API_KEY || '';
+        const geminiUrl = `https://generativelanguage.googleapis.com/v1beta/models/${aiModel}:generateContent?key=${geminiApiKey}`;
+
+        // Mapear los roles a la estructura nativa requerida por Gemini
+        const formattedContents = chatHistory.map((item) => ({
+          role: item.role === 'user' ? 'user' : 'model',
+          parts: [{ text: item.content }]
+        }));
+
+        const response = await fetch(geminiUrl, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            contents: formattedContents,
+            systemInstruction: {
+              parts: [{ text: systemPrompt }]
+            }
+          })
+        });
+
+        if (!response.ok) {
+          const errText = await response.text();
+          throw new Error(`Gemini API retornó código HTTP ${response.status}: ${errText}`);
+        }
+
+        const data: any = await response.json();
+        generatedText = data?.candidates?.[0]?.content?.parts?.[0]?.text || '';
+
+      } else if (aiProvider === 'anthropic' || aiProvider === 'claude') {
+        const anthropicApiKey = process.env.ANTHROPIC_API_KEY || '';
+        const parsedHistory = chatHistory.map((item) => ({
+          role: item.role === 'user' ? 'user' : 'assistant',
+          content: item.content
+        }));
+
+        const response = await fetch('https://api.anthropic.com/v1/messages', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'x-api-key': anthropicApiKey,
+            'anthropic-version': '2023-06-01'
+          },
+          body: JSON.stringify({
+            model: aiModel,
+            system: systemPrompt,
+            messages: parsedHistory,
+            max_tokens: 1024
+          })
+        });
+
+        if (!response.ok) {
+          const errText = await response.text();
+          throw new Error(`Anthropic API retornó código HTTP ${response.status}: ${errText}`);
+        }
+
+        const data: any = await response.json();
+        generatedText = data?.content?.[0]?.text || '';
+
+      } else {
+        // FALLBACK GLOBAL DE CHAT: OPENAI (GPT-4o, GPT-4 mini, etc.)
+        const openaiApiKey = process.env.OPENAI_API_KEY || '';
+        const openaiMessages = [
+          { role: 'system', content: systemPrompt },
+          ...chatHistory.map((item) => ({
+            role: item.role === 'user' ? 'user' : 'assistant',
+            content: item.content
+          }))
+        ];
+
+        const response = await fetch('https://api.openai.com/v1/chat/completions', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'Authorization': `Bearer ${openaiApiKey}`
+          },
+          body: JSON.stringify({
+            model: aiModel,
+            messages: openaiMessages
+          })
+        });
+
+        if (!response.ok) {
+          const errText = await response.text();
+          throw new Error(`OpenAI API retornó código HTTP ${response.status}: ${errText}`);
+        }
+
+        const data: any = await response.json();
+        generatedText = data?.choices?.[0]?.message?.content || '';
+      }
+    }
+
+    // 5. Normalizar resultado, registrar respuesta en el historial y sincronizar con Supabase
+    if (!generatedText && !generatedImageUrl) {
+      generatedText = 'Disculpa la molestia, pero me ha sido imposible procesar una respuesta en este momento.';
+    }
+
+    const aiAnswerLabel = generatedImageUrl
+      ? `[Imagen Generada por IA]: ${generatedImageUrl}`
+      : generatedText;
+
+    chatHistory.push({ role: 'model', content: aiAnswerLabel });
+
+    try {
+      await supabase.from('bot_chat_history').upsert(
+        {
+          customer_phone: customerPhone,
+          bot_phone_id: botPhoneId,
+          messages: chatHistory,
+          updated_at: new Date().toISOString()
+        },
+        { onConflict: 'customer_phone,bot_phone_id' }
+      );
+    } catch (upsertHistErr: any) {
+      console.error('[History Sync Error] Falló el guardado del historial:', upsertHistErr.message);
+    }
+
+    // 6. Despachar la respuesta saliente hacia la API oficial de WhatsApp Cloud (Meta)
+    const metaAccessToken = process.env.META_ACCESS_TOKEN || '';
+    const metaUrl = `https://graph.facebook.com/v17.0/${botPhoneId}/messages`;
+
+    let payload: any = {};
+
+    if (botType === 'image_generator' && generatedImageUrl) {
+      payload = {
+        messaging_product: 'whatsapp',
+        recipient_type: 'individual',
+        to: customerPhone,
+        type: 'image',
+        image: {
+          link: generatedImageUrl,
+          caption: `Aquí tienes tu diseño generado para: "${userText}"`
+        }
+      };
+    } else {
+      payload = {
+        messaging_product: 'whatsapp',
+        recipient_type: 'individual',
+        to: customerPhone,
+        type: 'text',
+        text: {
+          body: generatedText
+        }
+      };
+    }
+
+    console.log(`[Meta WhatsApp Outbound] Despachando mensaje saliente a ${customerPhone}`);
+    const metaResponse = await fetch(metaUrl, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${metaAccessToken}`
+      },
+      body: JSON.stringify(payload)
+    });
+
+    if (!metaResponse.ok) {
+      const metaErrText = await metaResponse.text();
+      console.error(`[Meta API Error] Error al despachar el mensaje: Status ${metaResponse.status}`, metaErrText);
+    } else {
+      console.log(`[Meta WhatsApp Outbound] Mensaje despachado exitosamente.`);
+    }
+
+  } catch (error: any) {
+    console.error('[procesarGeminiYResponder] Falló el procesamiento del flujo asincrónico:', error.message || error);
+  }
+}
