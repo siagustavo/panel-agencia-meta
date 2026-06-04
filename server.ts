@@ -157,10 +157,8 @@ app.post("/webhook", async (req: express.Request, res: express.Response) => {
             return res.sendStatus(200);
         }
 
-        // Pasamos el control a la Parte 3 (Gemini y Google Sheets)...
-        // [Aquí engancharemos la función procesarGeminiYResponder]
-
-        return res.sendStatus(200);
+       // Llamamos al motor pensante y ejecutor de Meta
+await procesarGeminiYResponder(customerPhone, userText, botConfig, botPhoneId); 
 
     } catch (globalError) {
         console.error("💥 Error crítico en el Webhook de recepción:", globalError);
