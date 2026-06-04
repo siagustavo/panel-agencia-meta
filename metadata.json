@@ -1,0 +1,6 @@
+{
+  "name": "Agencia IA - Panel Admin",
+  "description": "Panel de administración y control para agencias de inteligencia artificial, gestión de clientes de WhatsApp y canales de Chat en Vivo.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
