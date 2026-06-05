@@ -6,14 +6,6 @@ import path from "path";
 const app = express();
 app.use(express.json());
 
-// IMPORTANTE: Vite pone los archivos finales en una carpeta 'dist'
-const distPath = path.resolve(process.cwd(), "dist"); 
-app.use(express.static(distPath));
-
-app.get("*", (req, res) => {
-    res.sendFile(path.join(distPath, "index.html"));
-});
-
 // Conexión genérica a Supabase
 const supabaseUrl = process.env.SUPABASE_URL || "";
 const supabaseKey = process.env.SUPABASE_KEY || "";
@@ -21,35 +13,32 @@ const supabase = createClient(supabaseUrl, supabaseKey);
 
 // Puerto para Render
 const PORT = process.env.PORT || 3000;
+
+
 /**
  * 0. REGISTRO DE NUEVO COMERCIO (Puente del WABA ID)
- * Mapeo por atrás: webhook_secret -> se guarda en bot_phone_id en Supabase
+ * ¡VA ACÁ ARRIBA PARA QUE EL ASTERISCO NO LO PISE!
  */
 app.post("/api/registrar-comercio", async (req: express.Request, res: express.Response) => {
     try {
-        // Interceptamos los datos que manda el formulario viejo
         const { nombre, webhook_secret, token, phone_number_id, ...otherFields } = req.body;
-
-        // Metemos el puente: el "webhook_secret" del frente actúa como tu "bot_phone_id" de Meta
         const bot_phone_id = webhook_secret;
 
-        // Validamos que el ID sea la cadena numérica larga de Meta
         if (!bot_phone_id || !/^\d+$/.test(bot_phone_id)) {
             return res.status(400).json({
                 error: "El ID de WABA (webhook_secret) debe contener únicamente caracteres numéricos.",
             });
         }
 
-        // Insertamos en tu tabla real 'bots_config' usando tu estructura de 400 líneas
         const { data, error } = await supabase
             .from("bots_config")
             .insert([
                 {
                     client_name: nombre,
-                    bot_phone_id: bot_phone_id, // Guardado en el cable que usan tus funciones de abajo
+                    bot_phone_id: bot_phone_id,
                     active: true,
                     conversations_used: 0,
-                    conversations_limit: 1000, // Límite base por defecto
+                    conversations_limit: 1000,
                     ai_provider: "gemini",
                     ai_model: "gemini-2.5-flash",
                     system_prompt: "Responder de forma concisa, amable y profesional.",
@@ -67,6 +56,12 @@ app.post("/api/registrar-comercio", async (req: express.Request, res: express.Re
         return res.status(500).json({ error: error.message });
     }
 });
+
+
+// IMPORTANTE: Vite pone los archivos finales en una carpeta 'dist'
+const distPath = path.resolve(process.cwd(), "dist"); 
+app.use(express.static(distPath));
+
 /**
  * 1. VALIDACIÓN DEL WEBHOOK DE META (Apretón de manos)
  */
@@ -465,7 +460,9 @@ async function procesarGeminiYResponder(
     console.error('[procesarGeminiYResponder] Falló el procesamiento del flujo asincrónico:', error.message || error);
   }
 }
-
+app.get("*", (req, res) => {
+    res.sendFile(path.join(distPath, "index.html"));
+});
 // Escucha del servidor al final de todo el archivo para evitar bloqueos
 app.listen(PORT, () => {
     console.log(`🚀 Servidor espejo Meta Puro corriendo en puerto ${PORT}`);
