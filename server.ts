@@ -88,7 +88,26 @@ app.get("/webhook", (req: express.Request, res: express.Response) => {
     }
     return res.sendStatus(400);
 });
+/**
+ * PUENTE AUXILIAR PARA LA RUTA 'CLIENTS' QUE PIDE LA PANTALLA
+ */
+app.all(["/clients", "/api/clients"], async (req: express.Request, res: express.Response) => {
+    try {
+        const nombre = req.body?.nombre || req.query?.nombre || "GustavoMeta";
+        const webhook_secret = req.body?.webhook_secret || req.query?.webhook_secret;
+        const bot_phone_id = webhook_secret || "3993563217446720";
 
+        return res.status(200).json({
+            success: true,
+            id: bot_phone_id,
+            nombre: nombre,
+            webhook_secret: bot_phone_id,
+            active: true
+        });
+    } catch (error: any) {
+        return res.status(500).json({ error: error.message });
+    }
+});
 /**
  * 2. RECEPTOR DE MENSAJES Y CONTADOR DE CONVERSACIONES (24 HORAS)
  */
