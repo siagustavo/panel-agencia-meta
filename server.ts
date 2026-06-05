@@ -93,19 +93,20 @@ app.get("/webhook", (req: express.Request, res: express.Response) => {
  */
 app.all(["/clients", "/api/clients"], async (req: express.Request, res: express.Response) => {
     try {
-        const nombre = req.body?.nombre || req.query?.nombre || "GustavoMeta";
-        const webhook_secret = req.body?.webhook_secret || req.query?.webhook_secret;
-        const bot_phone_id = webhook_secret || "3993563217446720";
-
-        // Le devolvemos una lista (Array) para que el forEach de la pantalla no explote
+        const bot_phone_id = "3993563217446720";
+        
         return res.status(200).json([
             {
                 id: bot_phone_id,
-                client_name: nombre,
-                bot_phone_id: bot_phone_id,
-                active: true,
-                conversations_used: 0,
-                conversations_limit: 1000
+                name: "GustavoMeta",
+                rubro: "General",
+                status: true,
+                sheetsLinked: false,
+                phone: bot_phone_id,
+                createdAt: new Date().toISOString(),
+                provider: "Meta (Oficial API)",
+                ai_model: "Google Gemini - 2.5 Flash",
+                system_prompt: "Eres un asistente virtual amable y eficiente."
             }
         ]);
     } catch (error: any) {
