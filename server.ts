@@ -108,6 +108,10 @@ app.all(["/clients", "/api/clients"], async (req: express.Request, res: express.
                 conversations_limit: 1000
             }
         ]);
+    } catch (error: any) {
+        return res.status(500).json({ error: error.message });
+    }
+});
 /**
  * PUENTE DE TRANSMISIÓN EN VIVO PARA 'LIVE-UPDATES'
  */
