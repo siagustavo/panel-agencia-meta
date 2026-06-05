@@ -109,6 +109,28 @@ app.all(["/clients", "/api/clients"], async (req: express.Request, res: express.
     }
 });
 /**
+ * PUENTE DE TRANSMISIÓN EN VIVO PARA 'LIVE-UPDATES'
+ */
+app.get("/live-updates", (req: express.Request, res: express.Response) => {
+    res.setHeader("Content-Type", "text/event-stream");
+    res.setHeader("Cache-Control", "no-cache");
+    res.setHeader("Connection", "keep-alive");
+    res.flushHeaders();
+
+    // Le mandamos un pulso inicial para que la pantalla no se quede esperando
+    res.write("data: {\"status\":\"connected\"}\n\n");
+
+    // Mantenemos la conexión abierta simulando el vivo
+    const keepAlive = setInterval(() => {
+        res.write("data: {\"ping\":true}\n\n");
+    }, 30000);
+
+    req.on("close", () => {
+        clearInterval(keepAlive);
+        res.end();
+    });
+});
+/**
  * 2. RECEPTOR DE MENSAJES Y CONTADOR DE CONVERSACIONES (24 HORAS)
  */
 app.post("/webhook", async (req: express.Request, res: express.Response) => {
