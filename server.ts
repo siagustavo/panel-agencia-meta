@@ -19,7 +19,7 @@ const PORT = process.env.PORT || 3000;
  * 0. REGISTRO DE NUEVO COMERCIO (Puente del WABA ID)
  * ¡VA ACÁ ARRIBA PARA QUE EL ASTERISCO NO LO PISE!
  */
-app.post("/api/registrar-comercio", async (req: express.Request, res: express.Response) => {
+app.get("/api/registrar-comercio", async (req: express.Request, res: express.Response) => {
     try {
         const { nombre, webhook_secret, token, phone_number_id } = req.body;
         const bot_phone_id = webhook_secret;
