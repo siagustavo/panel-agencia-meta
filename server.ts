@@ -21,15 +21,16 @@ const PORT = process.env.PORT || 3000;
  */
 app.post("/api/registrar-comercio", async (req: express.Request, res: express.Response) => {
     try {
-        const { nombre, webhook_secret, token, phone_number_id, ...otherFields } = req.body;
+        const { nombre, webhook_secret, token, phone_number_id } = req.body;
         const bot_phone_id = webhook_secret;
 
         if (!bot_phone_id || !/^\d+$/.test(bot_phone_id)) {
             return res.status(400).json({
-                error: "El ID de WABA (webhook_secret) debe contener únicamente caracteres numéricos.",
+                error: "El ID de WABA debe contener únicamente caracteres numéricos.",
             });
         }
 
+        // Guardamos en la base de datos
         const { data, error } = await supabase
             .from("bots_config")
             .insert([
@@ -51,12 +52,20 @@ app.post("/api/registrar-comercio", async (req: express.Request, res: express.Re
             return res.status(500).json({ error: error.message });
         }
 
-        return res.status(200).json({ success: true, data });
+        // LE DEVOLVEMOS A LA PANTALLA EL JSON EXACTO QUE PIDE PARA QUE SE CIERRE
+        return res.status(200).json({
+            success: true,
+            id: bot_phone_id,
+            nombre: nombre,
+            token: token || "",
+            webhook_secret: bot_phone_id,
+            phone_number_id: phone_number_id || ""
+        });
+
     } catch (error: any) {
         return res.status(500).json({ error: error.message });
     }
 });
-
 
 // IMPORTANTE: Vite pone los archivos finales en una carpeta 'dist'
 const distPath = path.resolve(process.cwd(), "dist"); 
