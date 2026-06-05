@@ -97,17 +97,17 @@ app.all(["/clients", "/api/clients"], async (req: express.Request, res: express.
         const webhook_secret = req.body?.webhook_secret || req.query?.webhook_secret;
         const bot_phone_id = webhook_secret || "3993563217446720";
 
-        return res.status(200).json({
-            success: true,
-            id: bot_phone_id,
-            nombre: nombre,
-            webhook_secret: bot_phone_id,
-            active: true
-        });
-    } catch (error: any) {
-        return res.status(500).json({ error: error.message });
-    }
-});
+        // Le devolvemos una lista (Array) para que el forEach de la pantalla no explote
+        return res.status(200).json([
+            {
+                id: bot_phone_id,
+                client_name: nombre,
+                bot_phone_id: bot_phone_id,
+                active: true,
+                conversations_used: 0,
+                conversations_limit: 1000
+            }
+        ]);
 /**
  * PUENTE DE TRANSMISIÓN EN VIVO PARA 'LIVE-UPDATES'
  */
