@@ -195,6 +195,11 @@ app.post("/webhook", async (req: Request, res: Response) => {
     // Enviamos la respuesta directo por Meta
     await enviarMensajeMeta(customer_phone, botResponse);
 
+    // 🔥 ENVIAR LOS DATOS A TU PLANILLA ASOCIADA SI TIENE UN SCRIPT CARGADO
+    if (botConfig.sheet_id) {
+      await enviarAGoogleSheets(botConfig.sheet_id, customer_phone, userMessageText, botResponse);
+    }
+
     // Sumamos +1 al contador en Supabase en tiempo real
     await supabase
       .from("bots_config")
@@ -280,3 +285,21 @@ app.get("*", (req, res) => {
 app.listen(PORT, () => {
   console.log(`🚀 Servidor central operativo en el puerto ${PORT}`);
 });
+// ====== INTEGRACIÓN CON GOOGLE SHEETS ======
+async function enviarAGoogleSheets(urlScript: string, telefono: string, mensajeUsuario: string, respuestaBot: string): Promise<void> {
+  try {
+    const endpoint = urlScript.startsWith("http") ? urlScript : `https://script.google.com/macros/s/${urlScript}/exec`;
+    
+    await axios.post(endpoint, {
+      idUsuario: telefono,
+      mensaje: mensajeUsuario,
+      respuesta: respuestaBot,
+      fecha: new Date().toISOString()
+    }, {
+      headers: { "Content-Type": "application/json" }
+    });
+    console.log(`📊 Datos enviados con éxito al Sheets del probador.`);
+  } catch (error: any) {
+    console.error("❌ Error enviando a Google Sheets:", error.message);
+  }
+}
