@@ -3,7 +3,7 @@ import cors from "cors";
 import dotenv from "dotenv";
 import { createClient } from "@supabase/supabase-js";
 import axios from "axios";
-
+import path from "path";
 dotenv.config();
 
 const app = express();
@@ -269,7 +269,14 @@ setInterval(async () => {
     console.warn("Fallo el autoping.");
   }
 }, 10 * 60 * 1000);
+// Servir los archivos estáticos del nuevo panel (PROBOT-HUB)
+const __dirname = path.resolve();
+app.use(express.static(path.join(__dirname, "dist")));
 
+// Redirigir cualquier consulta web al diseño visual
+app.get("*", (req, res) => {
+  res.sendFile(path.join(__dirname, "dist", "index.html"));
+});
 app.listen(PORT, () => {
   console.log(`🚀 Servidor central operativo en el puerto ${PORT}`);
 });
