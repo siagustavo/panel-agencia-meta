@@ -1,446 +1,419 @@
-/**
- * @license
- * SPDX-License-Identifier: Apache-2.0
- */
-
 import React, { useState, useEffect } from "react";
-import Sidebar from "./components/Sidebar";
-import ClientDashboard from "./components/ClientDashboard";
-import LiveChat from "./components/LiveChat";
-import NewClientModal from "./components/NewClientModal";
-import ClientDetailDrawer from "./components/ClientDetailDrawer";
-import { Client, Message } from "./types";
-import { Terminal, ShieldCheck, RefreshCw, AlertCircle, Sparkles } from "lucide-react";
+import {
+  Plus,
+  ToggleLeft,
+  ToggleRight,
+  RefreshCw,
+  User,
+  Phone,
+  Shield,
+  Key,
+  FileSpreadsheet,
+  Mail,
+  BarChart,
+  Bot,
+  Layers,
+  AlertTriangle
+} from "lucide-react";
+
+interface Probador {
+  id: string;
+  client_name: string;
+  customer_phone: string;
+  access_code: string;
+  system_prompt: string;
+  gemini_api_key: string;
+  sheet_id?: string;
+  is_active: boolean;
+  message_limit: number;
+  message_count: number;
+  email?: string;
+  created_at: string;
+}
+
+const API_BASE_URL = import.meta.env.VITE_API_URL || "";
 
 export default function App() {
-  const [activeTab, setActiveTab] = useState<"clients" | "chat">("clients");
-  const [clients, setClients] = useState<Client[]>([]);
-  const [messages, setMessages] = useState<Message[]>([]);
-  const [isLoading, setIsLoading] = useState(true);
-  const [sseStatus, setSseStatus] = useState<"connecting" | "live" | "offline">("connecting");
+  const [probadores, setProbadores] = useState<Probador[]>([]);
+  const [loading, setLoading] = useState<boolean>(false);
+  const [formData, setFormData] = useState({
+    client_name: "",
+    customer_phone: "",
+    access_code: "",
+    system_prompt: "",
+    gemini_api_key: "",
+    sheet_id: "",
+    message_limit: 100,
+    email: "",
+  });
+  const [errorMsg, setErrorMsg] = useState<string | null>(null);
+  const [successMsg, setSuccessMsg] = useState<string | null>(null);
 
-  // Interaction overlays
-  const [showNewClientModal, setShowNewClientModal] = useState(false);
-  const [editingClient, setEditingClient] = useState<Client | null>(null);
-  const [selectedClientDetail, setSelectedClientDetail] = useState<Client | null>(null);
-  const [isLoggedOut, setIsLoggedOut] = useState(false);
-
-  // Load initial data
-  const fetchData = async () => {
+  const fetchProbadores = async () => {
+    setLoading(true);
     try {
-      const clientsRes = await fetch("/api/clients");
-      if (clientsRes.ok) {
-        const clientsData = await clientsRes.json();
-        setClients(clientsData);
-      }
-
-      const messagesRes = await fetch("/api/messages");
-      if (messagesRes.ok) {
-        const messagesData = await messagesRes.json();
-        setMessages(messagesData);
-      }
-    } catch (err) {
-      console.error("[App] Initial load error:", err);
+      const response = await fetch(`${API_BASE_URL}/api/probadores`);
+      if (!response.ok) throw new Error("Fallo al consultar los probadores.");
+      const data = await response.json();
+      setProbadores(data);
+    } catch (err: any) {
+      console.error(err);
     } finally {
-      setIsLoading(false);
+      setLoading(false);
     }
   };
 
   useEffect(() => {
-    fetchData();
+    fetchProbadores();
+  }, []);
 
-    // Setup real-time updates via Server-Sent Events (SSE)
-    console.log("[SSE] Establishing live stream connection...");
-    const eventSource = new EventSource("/api/live-updates");
+  const handleInputChange = (e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement>) => {
+    const { name, value } = e.target;
+    
+    // Si es el campo de teléfono, limpiamos todo lo que no sea número en tiempo real
+    if (name === "customer_phone") {
+      const cleaned = value.replace(/\D/g, "");
+      setFormData((prev) => ({ ...prev, [name]: cleaned }));
+    } else {
+      setFormData((prev) => ({ ...prev, [name]: value }));
+    }
+  };
 
-    eventSource.onopen = () => {
-      console.log("[SSE] Connection established successfully and active.");
-      setSseStatus("live");
-    };
-
-    eventSource.addEventListener("CLIENTS_UPDATED", (event: MessageEvent) => {
-      try {
-        const updatedClients = JSON.parse(event.data);
-        console.log("[SSE] Clients table updated. Length:", updatedClients.length);
-        setClients(updatedClients);
-      } catch (err) {
-        console.error("[SSE] Failed to parse updated clients", err);
-      }
-    });
-
-    eventSource.addEventListener("MESSAGES_UPDATED", (event: MessageEvent) => {
-      try {
-        const updatedMessages = JSON.parse(event.data);
-        console.log("[SSE] Message stream updated. Length:", updatedMessages.length);
-        setMessages(updatedMessages);
-      } catch (err) {
-        console.error("[SSE] Failed to parse updated messages", err);
-      }
-    });
-
-    eventSource.onerror = (e) => {
-      console.warn("[SSE] Stream went offline or disconnected. Reconnecting...", e);
-      setSseStatus("offline");
-    };
-
-    // Polling fallback just in case SSE has issues
-    const pollInterval = setInterval(() => {
-      if (sseStatus === "offline" || sseStatus === "connecting") {
-        console.log("[Fallback Polling] Syncing backend data...");
-        fetchData();
-      }
-    }, 6000);
-
-    return () => {
-      eventSource.close();
-      clearInterval(pollInterval);
-    };
-  }, [sseStatus]);
-
-  // Handle toggling Bot Switch (PATCH /api/clients/:id)
-  const handleToggleStatus = async (id: string, currentStatus: boolean) => {
+  const handleToggleActive = async (id: string, currentStatus: boolean) => {
     try {
-      // Optimistic state
-      setClients((prev) =>
-        prev.map((c) => (c.id === id ? { ...c, status: !currentStatus } : c))
-      );
-
-      const res = await fetch(`/api/clients/${id}`, {
+      const response = await fetch(`${API_BASE_URL}/api/probadores/${id}/toggle`, {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ status: !currentStatus }),
+        body: JSON.stringify({ is_active: !currentStatus }),
       });
-
-      if (!res.ok) {
-        throw new Error("No se pudo persistir el cambio de estado del bot.");
-      }
-    } catch (err) {
-      console.error(err);
-      fetchData(); // Rollback on error
-    }
-  };
-
-  // Handle toggling Google Sheets Vinculado state (PATCH /api/clients/:id)
-  const handleToggleSheets = async (id: string, currentStatus: boolean) => {
-    try {
-      setClients((prev) =>
-        prev.map((c) => (c.id === id ? { ...c, sheetsLinked: !currentStatus } : c))
-      );
-
-      const res = await fetch(`/api/clients/${id}`, {
-        method: "PATCH",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ sheetsLinked: !currentStatus }),
-      });
-
-      if (!res.ok) {
-        throw new Error("No se pudo configurar la sincronización de Sheets.");
-      }
-    } catch (err) {
-      console.error(err);
-      fetchData();
-    }
-  };
-  // Submit client registrations and details updates dynamically (POST or PATCH)
-  const handleSaveClient = async (clientData: {
-    name: string;
-    rubro: string;
-    phone: string;
-    sheetsLinked: boolean;
-    provider: string;
-    provider_token: string;
-    webhook_secret: string;
-    sheets_url: string;
-    payment_mercadopago: string;
-    payment_uala_modo: string;
-    payment_stripe: string;
-    payment_paypal: string;
-    gemini_api_key: string;
-    ai_model: string;
-    system_prompt: string;
-  }): Promise<boolean> => {
-    try {
-      const url = editingClient ? `/api/clients/${editingClient.id}` : "/api/clients";
-
-      let res;
-      if (editingClient) {
-        // Edit existing client
-        res = await fetch(url, {
-          method: "PATCH",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            name: clientData.name,
-            rubro: clientData.rubro,
-            phone: clientData.phone,
-            sheetsLinked: clientData.sheetsLinked,
-            provider: clientData.provider,
-            provider_token: clientData.provider_token,
-            webhook_secret: clientData.webhook_secret,
-            sheets_url: clientData.sheets_url,
-            payment_mercadopago: clientData.payment_mercadopago,
-            payment_uala_modo: clientData.payment_uala_modo,
-            payment_stripe: clientData.payment_stripe,
-            payment_paypal: clientData.payment_paypal,
-            gemini_api_key: clientData.gemini_api_key,
-            ai_model: clientData.ai_model,
-            system_prompt: clientData.system_prompt,
-          }),
-        });
-      } else {
-        // Create new client
-        res = await fetch("/api/clients", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            name: clientData.name,
-            rubro: clientData.rubro,
-            phone: clientData.phone,
-            sheetsLinked: clientData.sheetsLinked,
-            status: true, // starts enabled by default
-            provider: clientData.provider,
-            provider_token: clientData.provider_token,
-            webhook_secret: clientData.webhook_secret,
-            sheets_url: clientData.sheets_url,
-            payment_mercadopago: clientData.payment_mercadopago,
-            payment_uala_modo: clientData.payment_uala_modo,
-            payment_stripe: clientData.payment_stripe,
-            payment_paypal: clientData.payment_paypal,
-            gemini_api_key: clientData.gemini_api_key,
-            ai_model: clientData.ai_model,
-            system_prompt: clientData.system_prompt,
-          }),
-        });
-      }
-
-      if (res && res.ok) {
-        // Refresh local memory and SSE lists immediately
-        const freshRes = await fetch("/api/clients");
-        if (freshRes.ok) {
-          const freshData = await freshRes.json();
-          setClients(freshData);
-          if (selectedClientDetail && editingClient) {
-            const updated = freshData.find((c: Client) => c.id === editingClient.id);
-            if (updated) setSelectedClientDetail(updated);
-          }
-        }
-        setEditingClient(null);
-        return true;
-      }
-      return false;
-    } catch (err) {
-      console.error("[SaveClient Error]:", err);
-      return false;
-    }
-  };
-
-  // Completely delete client row from in-memory DB (DELETE /api/clients/:id)
-  const handleDeleteClient = async (id: string) => {
-    try {
-      // Optimistic delete
-      setClients((prev) => prev.filter((c) => c.id !== id));
-      if (selectedClientDetail && selectedClientDetail.id === id) {
-        setSelectedClientDetail(null);
-      }
-
-      const res = await fetch(`/api/clients/${id}`, {
-        method: "DELETE"
-      });
-
-      if (!res.ok) {
-        throw new Error("No se pudo eliminar el comercio de la base de datos.");
-      }
-    } catch (err) {
-      console.error("[DeleteClient Error]:", err);
-      fetchData(); // rollback
-    }
-  };
-
-  // Support message response manual submission
-  const handleSendMessage = async (
-    clientId: string,
-    text: string,
-    senderName?: string,
-    senderPhone?: string
-  ) => {
-    const res = await fetch("/api/messages", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        clientId,
-        text,
-        senderName: senderName || "Soporte Agencia IA",
-        senderPhone,
-      }),
-    });
-    return res.json();
-  };
-
-  // Simulate/Receive incoming whatsapp payload from third-party Webhook endpoint
-  const handleSendWebhook = async (payload: {
-    clientId: string;
-    senderName: string;
-    senderPhone: string;
-    text: string;
-  }) => {
-    const res = await fetch("/api/webhook/whatsapp", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(payload),
-    });
-    return res.json();
-  };
-
-  // Logout reset simulator
-  const handleLogout = () => {
-    setIsLoggedOut(true);
-  };
-
-  const handleReconnect = () => {
-    setIsLoggedOut(false);
-    fetchData();
-  };
-
-  // Inspect detail flyout navigates instantly to conversation view
-  const handleNavigateToChat = (clientId: string) => {
-    setSelectedClientDetail(null);
-    setActiveTab("chat");
-  };
-
-  // Calculate pending message queue count
-  // Filter clients to see which ones have their last message as incoming
-  const getPendingMessagesCount = () => {
-    let unrepliedCount = 0;
-    clients.forEach((client) => {
-      const clientMsgs = messages.filter((m) => m.clientId === client.id);
-      if (clientMsgs.length > 0) {
-        // Sort ascending to get last message
-        const sorted = [...clientMsgs].sort(
-          (a, b) => new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime()
+      if (response.ok) {
+        setProbadores((prev) =>
+          prev.map((p) => (p.id === id ? { ...p, is_active: !currentStatus } : p))
         );
-        const lastMsg = sorted[sorted.length - 1];
-        if (lastMsg && lastMsg.incoming) {
-          unrepliedCount += 1;
-        }
       }
-    });
-    return unrepliedCount;
+    } catch (err) {
+      console.error("Error al actualizar estado del probador", err);
+    }
   };
 
-  const pendingCount = getPendingMessagesCount();
+  const handleSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setErrorMsg(null);
+    setSuccessMsg(null);
 
-  // If user simulated a general log out
-  if (isLoggedOut) {
-    return (
-      <div className="w-screen h-screen bg-[#030712] flex items-center justify-center p-4">
-        <div className="w-full max-w-md bg-[#0a0e1a] border border-red-505/20 rounded-2xl p-8 text-center space-y-6 shadow-2xl relative overflow-hidden">
-          <div className="absolute top-0 left-0 w-full h-1 bg-gradient-to-r from-red-500 to-amber-500" />
-          
-          <div className="w-16 h-16 rounded-2xl bg-red-950/40 border border-red-900/30 flex items-center justify-center mx-auto shadow-lg shadow-red-500/10">
-            <AlertCircle className="w-8 h-8 text-red-400" />
-          </div>
+    // Validación: Correo removido de los campos obligatorios (ahora es opcional)
+    if (
+      !formData.client_name ||
+      !formData.customer_phone ||
+      !formData.access_code ||
+      !formData.system_prompt ||
+      !formData.gemini_api_key
+    ) {
+      setErrorMsg("Por favor, complete todos los campos obligatorios (*).");
+      return;
+    }
 
-          <div className="space-y-2">
-            <h2 className="font-display font-bold text-2xl text-white">Sesión Finalizada</h2>
-            <p className="text-gray-400 text-sm max-w-sm mx-auto">
-              Has cerrado la sesión del panel de administración del ecosistema de la <span className="text-cyan-400">Agencia IA</span>.
-            </p>
-          </div>
+    try {
+      const response = await fetch(`${API_BASE_URL}/api/registrar-probador`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(formData),
+      });
 
-          <button
-            onClick={handleReconnect}
-            className="w-full py-3 px-4 rounded-xl bg-cyan-500 hover:bg-cyan-400 text-black font-bold text-sm tracking-wider transition-all shadow-lg shadow-cyan-500/15 cursor-pointer"
-          >
-            Volver a Ingresar
-          </button>
-        </div>
-      </div>
-    );
-  }
+      const resData = await response.json();
+
+      if (!response.ok) {
+        throw new Error(resData.error || "Error al realizar el registro.");
+      }
+
+      setSuccessMsg("Probador registrado de manera correcta e iniciado.");
+      setFormData({
+        client_name: "",
+        customer_phone: "",
+        access_code: "",
+        system_prompt: "",
+        gemini_api_key: "",
+        sheet_id: "",
+        message_limit: 100,
+        email: "",
+      });
+      fetchProbadores();
+    } catch (err: any) {
+      setErrorMsg(err.message || "Ocurrió un error inesperado.");
+    }
+  };
 
   return (
-    <div className="w-screen h-screen flex bg-[#030712] text-gray-100 overflow-hidden relative">
-      {/* Background Decor Ambient Vector Glows */}
-      <div className="absolute top-[-10%] left-[-10%] w-[50%] h-[50%] bg-blue-500/5 rounded-full blur-[160px] pointer-events-none" />
-      <div className="absolute bottom-[-10%] right-[-10%] w-[50%] h-[50%] bg-cyan-500/5 rounded-full blur-[160px] pointer-events-none" />
-
-      {/* Main Left Menu Sidebar */}
-      <Sidebar
-        activeTab={activeTab}
-        setActiveTab={setActiveTab}
-        pendingMsgCount={pendingCount}
-        onLogout={handleLogout}
-      />
-
-      {/* Central Interactive Canvas Viewport */}
-      <main className="flex-1 h-full flex flex-col min-w-0 bg-[#060b18]/45 relative">
-        {/* Loading Overlay */}
-        {isLoading ? (
-          <div className="absolute inset-0 bg-[#030712]/90 flex flex-col items-center justify-center z-40 space-y-4">
-            <div className="relative">
-              <div className="w-12 h-12 rounded-full border-t-2 border-r-2 border-cyan-500 animate-spin" />
-              <Terminal className="w-5 h-5 text-cyan-400 absolute inset-0 m-auto" />
+    <div className="min-h-screen bg-slate-950 text-slate-100 font-sans selection:bg-indigo-500 selection:text-white">
+      {/* Header */}
+      <header className="border-b border-slate-900 bg-slate-950/80 backdrop-blur sticky top-0 z-50">
+        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 h-16 flex items-center justify-between">
+          <div className="flex items-center space-x-3">
+            <div className="bg-indigo-600/20 p-2 rounded-lg border border-indigo-500/30">
+              <Bot className="w-6 h-6 text-indigo-400" />
             </div>
-            <p className="text-sm font-mono text-cyan-400 tracking-wider">Cargando base de datos de comercios...</p>
+            <div>
+              <span className="font-extrabold text-lg tracking-wider bg-clip-text text-transparent bg-gradient-to-r from-indigo-400 via-purple-400 to-pink-400">
+                PROBOT-HUB
+              </span>
+              <span className="text-xs block text-slate-400 font-medium">Línea Maestro Meta: +54 9 2241 61-8419</span>
+            </div>
           </div>
-        ) : null}
+          <button
+            onClick={fetchProbadores}
+            className="flex items-center space-x-2 bg-slate-900 hover:bg-slate-800 border border-slate-800 text-slate-300 px-3 py-1.5 rounded-lg text-sm transition-all"
+          >
+            <RefreshCw className={`w-4 h-4 ${loading ? "animate-spin" : ""}`} />
+            <span>Refrescar Panel</span>
+          </button>
+        </div>
+      </header>
 
-        {activeTab === "clients" ? (
-          <ClientDashboard
-            clients={clients}
-            onToggleStatus={handleToggleStatus}
-            onToggleSheets={handleToggleSheets}
-            onOpenNewClientModal={() => {
-              setEditingClient(null);
-              setShowNewClientModal(true);
-            }}
-            onSelectClient={(client) => setSelectedClientDetail(client)}
-            onEditClient={(client) => {
-              setEditingClient(client);
-              setShowNewClientModal(true);
-            }}
-            onDeleteClient={handleDeleteClient}
-          />
-        ) : (
-          <LiveChat
-            clients={clients}
-            messages={messages}
-            onSendMessage={handleSendMessage}
-            onSendWebhook={handleSendWebhook}
-          />
-        )}
+      <main className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8 space-y-8">
+        {/* Banner Informativo */}
+        <div className="bg-indigo-950/20 border border-indigo-500/10 rounded-2xl p-6 flex items-start space-x-4">
+          <Layers className="w-8 h-8 text-indigo-400 shrink-0 mt-1" />
+          <div>
+            <h2 className="text-lg font-semibold text-indigo-200">Panel de Activación Rápida de Demos</h2>
+            <p className="text-sm text-slate-400 mt-1 leading-relaxed">
+              Ingresá manualmente el número del cliente para dejarlo atado a su entorno de testeo. Cuando ese número específico escriba a tu línea maestra, el motor aislará su flujo usando sus propias llaves de Gemini y sus directivas personalizadas, descontando mensajes de su cuota fija.
+            </p>
+          </div>
+        </div>
 
-        {/* Real-time sync tiny status bar at the top-right corner to keep UI honest, premium, clean */}
-        <div className="absolute top-6 md:top-8 right-8 flex items-center gap-2.5 px-3 py-1.5 rounded-full bg-black/45 border border-[#ffffff0e] text-[10px] select-none z-30 pointer-events-none font-mono">
-          <span className="w-2 h-2 rounded-full bg-emerald-400 neon-green-pulse" />
-          <span className="text-gray-400 font-medium">
-            Conexión Real-Time Activa
-          </span>
+        {/* Formulario y Tabla de Clientes */}
+        <div className="grid grid-cols-1 lg:grid-cols-12 gap-8">
+          {/* Formulario de registro */}
+          <section className="lg:col-span-4 bg-slate-900/40 border border-slate-900 rounded-2xl p-6 space-y-6">
+            <div className="border-b border-slate-800/80 pb-4">
+              <h3 className="text-lg font-bold text-slate-100 flex items-center gap-2">
+                <Plus className="w-5 h-5 text-indigo-400" /> Alta de Probador Manual
+              </h3>
+              <p className="text-xs text-slate-400 mt-1">Vinculación inmediata del celular del cliente.</p>
+            </div>
+
+            {errorMsg && (
+              <div className="p-3 bg-red-950/30 border border-red-500/20 text-red-400 rounded-xl text-xs flex items-center gap-2">
+                <AlertTriangle className="w-4 h-4 shrink-0" />
+                <span>{errorMsg}</span>
+              </div>
+            )}
+
+            {successMsg && (
+              <div className="p-3 bg-emerald-950/30 border border-emerald-500/20 text-emerald-400 rounded-xl text-xs">
+                {successMsg}
+              </div>
+            )}
+
+            <form onSubmit={handleSubmit} className="space-y-4">
+              <div className="space-y-1.5">
+                <label className="text-xs font-semibold text-slate-300 flex items-center gap-1.5">
+                  <User className="w-3.5 h-3.5 text-slate-400" /> Nombre del Negocio / Cliente *
+                </label>
+                <input
+                  type="text"
+                  name="client_name"
+                  value={formData.client_name}
+                  onChange={handleInputChange}
+                  placeholder="Ej. Carnicería Don Fer"
+                  className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3.5 py-2 text-sm text-slate-200 focus:outline-none focus:border-indigo-500/50 transition-all"
+                  required
+                />
+              </div>
+
+              <div className="space-y-1.5">
+                <label className="text-xs font-semibold text-slate-300 flex items-center gap-1.5">
+                  <Phone className="w-3.5 h-3.5 text-slate-400" /> WhatsApp del Probador (Sin +, solo números) *
+                </label>
+                <input
+                  type="text"
+                  name="customer_phone"
+                  value={formData.customer_phone}
+                  onChange={handleInputChange}
+                  placeholder="Ej. 5491122334455"
+                  className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3.5 py-2 text-sm text-slate-200 focus:outline-none focus:border-indigo-500/50 transition-all"
+                  required
+                />
+              </div>
+
+              <div className="space-y-1.5">
+                <label className="text-xs font-semibold text-slate-300 flex items-center gap-1.5">
+                  <Shield className="w-3.5 h-3.5 text-slate-400" /> Código Interno / Token de Control *
+                </label>
+                <input
+                  type="text"
+                  name="access_code"
+                  value={formData.access_code}
+                  onChange={handleInputChange}
+                  placeholder="Ej. PROB-CARNE"
+                  className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3.5 py-2 text-sm text-slate-200 focus:outline-none focus:border-indigo-500/50 transition-all"
+                  required
+                />
+              </div>
+
+              <div className="space-y-1.5">
+                <label className="text-xs font-semibold text-slate-300 flex items-center gap-1.5">
+                  <Key className="w-3.5 h-3.5 text-slate-400" /> Gemini API Key (Su Cerebro) *
+                </label>
+                <input
+                  type="password"
+                  name="gemini_api_key"
+                  value={formData.gemini_api_key}
+                  onChange={handleInputChange}
+                  placeholder="AIzaSy..."
+                  className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3.5 py-2 text-sm text-slate-200 focus:outline-none focus:border-indigo-500/50 transition-all"
+                  required
+                />
+              </div>
+
+              <div className="space-y-1.5">
+                <label className="text-xs font-semibold text-slate-300 flex items-center gap-1.5">
+                  <FileSpreadsheet className="w-3.5 h-3.5 text-slate-400" /> Google Sheet Script ID (Opcional)
+                </label>
+                <input
+                  type="text"
+                  name="sheet_id"
+                  value={formData.sheet_id}
+                  onChange={handleInputChange}
+                  placeholder="ID de la hoja de cálculo..."
+                  className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3.5 py-2 text-sm text-slate-200 focus:outline-none focus:border-indigo-500/50 transition-all"
+                />
+              </div>
+
+              <div className="space-y-1.5">
+                <label className="text-xs font-semibold text-slate-300 flex items-center gap-1.5">
+                  <BarChart className="w-3.5 h-3.5 text-slate-400" /> Límite de Mensajes Permitidos
+                </label>
+                <input
+                  type="number"
+                  name="message_limit"
+                  value={formData.message_limit}
+                  onChange={handleInputChange}
+                  min="1"
+                  className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3.5 py-2 text-sm text-slate-200 focus:outline-none focus:border-indigo-500/50 transition-all"
+                />
+              </div>
+
+              <div className="space-y-1.5">
+                <label className="text-xs font-semibold text-slate-300 flex items-center gap-1.5">
+                  <Mail className="w-3.5 h-3.5 text-slate-400" /> Correo electrónico de Seguimiento (Opcional)
+                </label>
+                <input
+                  type="email"
+                  name="email"
+                  value={formData.email}
+                  onChange={handleInputChange}
+                  placeholder="correo@opcional.com"
+                  className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3.5 py-2 text-sm text-slate-200 focus:outline-none focus:border-indigo-500/50 transition-all"
+                />
+              </div>
+
+              <div className="space-y-1.5">
+                <label className="text-xs font-semibold text-slate-300">System Prompt del Negocio *</label>
+                <textarea
+                  name="system_prompt"
+                  value={formData.system_prompt}
+                  onChange={handleInputChange}
+                  rows={4}
+                  placeholder="Ej: Sos el bot de una carnicería. Responde con buena onda, ofrece asado los viernes y..."
+                  className="w-full bg-slate-950 border border-slate-800 rounded-xl p-3 text-sm text-slate-200 focus:outline-none focus:border-indigo-500/50 transition-all resize-none"
+                  required
+                />
+              </div>
+
+              <button
+                type="submit"
+                className="w-full bg-gradient-to-r from-indigo-600 to-purple-600 hover:from-indigo-500 hover:to-purple-500 text-white font-medium py-2 px-4 rounded-xl text-sm shadow-lg shadow-indigo-500/10 transition-all duration-200 mt-2"
+              >
+                Activar y Vincular Probador
+              </button>
+            </form>
+          </section>
+
+          {/* Tabla de administración */}
+          <section className="lg:col-span-8 space-y-4">
+            <div className="bg-slate-900/40 border border-slate-900 rounded-2xl overflow-hidden">
+              <div className="px-6 py-4 border-b border-slate-800/80 bg-slate-900/20 flex items-center justify-between">
+                <div>
+                  <h3 className="font-bold text-slate-100">Simuladores en Curso</h3>
+                  <p className="text-xs text-slate-400 mt-0.5">Monitoreo en vivo de los clientes testeando.</p>
+                </div>
+              </div>
+
+              <div className="overflow-x-auto">
+                <table className="w-full text-left border-collapse text-sm">
+                  <thead>
+                    <tr className="border-b border-slate-800/80 text-slate-400 text-xs uppercase bg-slate-950/20">
+                      <th className="px-6 py-3.5 font-semibold">Cliente / Probador</th>
+                      <th className="px-6 py-3.5 font-semibold">Teléfono Enlazado</th>
+                      <th className="px-6 py-3.5 font-semibold">Consumo / Corte Automático</th>
+                      <th className="px-6 py-3.5 font-semibold text-center">Bot Activo</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-slate-900">
+                    {probadores.length === 0 ? (
+                      <tr>
+                        <td colSpan={4} className="text-center py-10 text-slate-500 text-xs">
+                          No hay ningún probador activo en este momento.
+                        </td>
+                      </tr>
+                    ) : (
+                      probadores.map((p) => {
+                        const usagePercentage = Math.min(
+                          (p.message_count / p.message_limit) * 100,
+                          100
+                        );
+                        return (
+                          <tr key={p.id} className="hover:bg-slate-900/20 transition-all">
+                            <td className="px-6 py-4">
+                              <div className="font-semibold text-slate-200">{p.client_name}</div>
+                              {p.email && <div className="text-xs text-slate-500 mt-0.5">{p.email}</div>}
+                            </td>
+                            <td className="px-6 py-4 font-mono text-xs text-indigo-400">
+                              +{p.customer_phone}
+                            </td>
+                            <td className="px-6 py-4 space-y-1.5">
+                              <div className="flex justify-between text-xs text-slate-400">
+                                <span className="font-medium">{p.message_count} consumidos</span>
+                                <span className="font-semibold text-slate-500">Límite: {p.message_limit}</span>
+                              </div>
+                              <div className="w-full bg-slate-950 rounded-full h-1.5 overflow-hidden border border-slate-800">
+                                <div
+                                  style={{ width: `${usagePercentage}%` }}
+                                  className={`h-full rounded-full transition-all duration-300 ${
+                                    usagePercentage >= 90
+                                      ? "bg-red-500"
+                                      : usagePercentage >= 75
+                                      ? "bg-yellow-500"
+                                      : "bg-gradient-to-r from-indigo-500 to-purple-500"
+                                  }`}
+                                />
+                              </div>
+                            </td>
+                            <td className="px-6 py-4 text-center">
+                              <button
+                                type="button"
+                                onClick={() => handleToggleActive(p.id, p.is_active)}
+                                className="focus:outline-none"
+                              >
+                                {p.is_active ? (
+                                  <ToggleRight className="w-8 h-8 text-indigo-400 hover:text-indigo-300 transition-all cursor-pointer" />
+                                ) : (
+                                  <ToggleLeft className="w-8 h-8 text-slate-600 hover:text-slate-500 transition-all cursor-pointer" />
+                                )}
+                              </button>
+                            </td>
+                          </tr>
+                        );
+                      })
+                    )}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          </section>
         </div>
       </main>
-
-      {/* MODAL: Add / Edit Client Dialog */}
-      {showNewClientModal && (
-        <NewClientModal
-          client={editingClient || undefined}
-          onClose={() => {
-            setShowNewClientModal(false);
-            setEditingClient(null);
-          }}
-          onSubmit={handleSaveClient}
-        />
-      )}
-
-      {/* FLYOUT DRAWER: Client Deeper Settings & Payload Trigger */}
-      {selectedClientDetail && (
-        <ClientDetailDrawer
-          client={selectedClientDetail}
-          onClose={() => setSelectedClientDetail(null)}
-          onToggleStatus={handleToggleStatus}
-          onToggleSheets={handleToggleSheets}
-          onSendWebhook={handleSendWebhook}
-          onNavigateToChat={handleNavigateToChat}
-        />
-      )}
     </div>
   );
 }
